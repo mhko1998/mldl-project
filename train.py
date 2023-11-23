@@ -24,6 +24,23 @@ class Net(nn.Module):
         x, _status = self.lstm(x)
         x = self.fc(x[:, -1])
         return x
+    
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self):
+        self.reset()
+ 
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+ 
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n 
+        self.avg = self.sum / self.count
 
 def train_model(model, train_df, val_df, num_epochs = None, lr = None, verbose = 10, patience = 10):
      
@@ -104,32 +121,126 @@ def evaluate(model, val_df) :
     avg_accuracy = corrects / total
     print(avg_loss, avg_accuracy.item())
 
-if __name__=='__main__':
+def train(model, trainloader, criterion, optimizer, device, epoch):
+    model.train()
+    total_batch = len(trainloader)
+    print("training epoch : ", epoch)
+    print("total_batch : ", total_batch)
+
+    avg_loss = AverageMeter()
+
     
-  path = '/home/minhwan/workspace/mldl/train.csv'
-  save_path = '/home/minhwan/workspace/mldl/ckp'
-  
-  device = 'cuda:0'
-  
-  input_size, output_size, hidden_dim, sequence_length, num_layer = 2, 2, 64, 10, 2
-  
-  learning_rate = 0.1
-  epochs = 1000
-  batch_size = 128
-  
-  train_dataset = mldldataset(path, preprocess=True, flag = "train")
-  train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=24, shuffle=False)
+    for batch_idx, samples in tqdm(enumerate(trainloader)):
+        label, x_train  = samples
+        
+        model.reset_hidden_state()
+        x_train = x_train.to(device)
+        y_train = label.to(device)
+        
+        outputs = model(x_train)
+        loss = criterion(outputs, y_train) 
+        avg_loss.update(loss.item(), x_train.size(0))
+        if batch_idx % 100 == 0:
+            print("loss : ", avg_loss.avg)
+        
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-  val_dataset = mldldataset(path, preprocess=True, flag = "val")
-  val_dataloader = DataLoader(val_dataset, batch_size=batch_size, num_workers=24, shuffle=False)
+           
+    return avg_loss.avg
+
+def validate(model, valloader, criterion, device, epoch):
+    model.eval()
+    total_batch = len(valloader)
+    print("validate epoch : ", epoch)
+    print("total_batch : ", total_batch)
+
+    avg_loss = AverageMeter()
+    acc = 0
+
+    
+    for batch_idx, samples in tqdm(enumerate(valloader)):
+        label, x_train  = samples
+        
+        model.reset_hidden_state()
+        x_train = x_train.to(device)
+        y_train = label.to(device)
+        
+        outputs = model(x_train)
+        loss = criterion(outputs, y_train) 
+        avg_loss.update(loss.item(), x_train.size(0))
+        
+        acc += (outputs.max(1)[1].view(y_train.size()).data == y_train.data).sum()
+
+
+    print("acc : ", acc/len(valloader.dataset))   
+    return avg_loss.avg
+
+if __name__=='__main__':
+    train_dataset = mldldataset(None, False, "train")
+    val_dataset = mldldataset(None, False, "val")
+    train_dataloader = DataLoader(train_dataset, batch_size=16384, num_workers=24, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=16384, num_workers=24, shuffle=False)
+
+    device = 'cuda:0'
+
+    model = Net(2, 64, 10, 2, 2).to(device)
+    criterion = nn.CrossEntropyLoss().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.01)
+
+    for epoch in range(100):
+        train_result = train(model, train_dataloader, criterion, optimizer, device, epoch)
+
+        ## save model
+
+        val_result = validate(model, val_dataloader, criterion, device, epoch)
+        print("val_loss : ", val_result)
+
+
+        torch.save(model.state_dict(), "checkpoint/"+"baseline_{}_valloss_{:.4f}.pth".format(epoch, val_result))
+
+
+    # for batch_idx, samples in tqdm(enumerate(train_dataloader)):
+    #     label, x_train  = samples
+    #     print(label.shape, x_train.shape)
+
+    #     x_train = x_train.to(device)
+    #     y_train = label.to(device)
+    #     outputs = model(x_train)
+
+    #     loss = criterion(outputs, y_train)
+
+    #     import pdb; pdb.set_trace()
+
+    
+
+
+
+#   path = '/home/minhwan/workspace/mldl/train.csv'
+#   save_path = '/home/minhwan/workspace/mldl/ckp'
   
-  net = Net(input_dim = input_size, hidden_dim= hidden_dim, seq_len=sequence_length, output_dim = output_size, layers = num_layer).to(device)  
+#   device = 'cuda:0'
+  
+#   input_size, output_size, hidden_dim, sequence_length, num_layer = 2, 2, 64, 10, 2
+  
+#   learning_rate = 0.1
+#   epochs = 1000
+#   batch_size = 128
+  
+#   train_dataset = mldldataset(path, preprocess=True, flag = "train")
+#   train_dataloader = DataLoader(train_dataset, batch_size=batch_size, num_workers=24, shuffle=False)
+
+#   val_dataset = mldldataset(path, preprocess=True, flag = "val")
+#   val_dataloader = DataLoader(val_dataset, batch_size=batch_size, num_workers=24, shuffle=False)
+  
+#   net = Net(input_dim = input_size, hidden_dim= hidden_dim, seq_len=sequence_length, output_dim = output_size, layers = num_layer).to(device)  
   
   
-  model, train_hist = train_model(net, train_dataloader, val_df=val_dataloader, num_epochs = epochs, lr = learning_rate, verbose = 20, patience = 10)
+#   model, train_hist = train_model(net, train_dataloader, val_df=val_dataloader, num_epochs = epochs, lr = learning_rate, verbose = 20, patience = 10)
   
 
-  ## for inference
-#   net.load_state_dict(torch.load("/home/minhwan/workspace/mldl/ceckp/0.pth")["model_state_dict"])
+#   ## for inference
+# #   net.load_state_dict(torch.load("/home/minhwan/workspace/mldl/ceckp/0.pth")["model_state_dict"])
   
-#   evaluate(net, val_dataloader)   
+# #   evaluate(net, val_dataloader)   
